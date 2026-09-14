@@ -1,0 +1,1488 @@
+import os
+import re
+import json
+import urllib.request
+import urllib.error
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+
+
+# ============================================================
+# APPLICATION SETTINGS
+# ============================================================
+
+APP_TITLE = "NDMU Grade Report Console"
+
+DEFAULT_SENDER_EMAIL = os.getenv(
+    "BREVO_SENDER_EMAIL",
+    "your-email@example.com"
+)
+
+BREVO_API_KEY = os.getenv(
+    "BREVO_API_KEY",
+    ""
+).strip()
+
+
+# ============================================================
+# COLOR PALETTE
+# ============================================================
+
+BG_COLOR = "#F5F7FA"
+CARD_COLOR = "#FFFFFF"
+PRIMARY_COLOR = "#174A7E"
+PRIMARY_HOVER = "#123B65"
+TEXT_COLOR = "#172B4D"
+SECONDARY_TEXT = "#6B778C"
+BORDER_COLOR = "#E1E6ED"
+SUCCESS_COLOR = "#16855B"
+DANGER_COLOR = "#C9372C"
+LOG_BG = "#17202B"
+LOG_TEXT = "#B9F6CA"
+
+
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
+
+class GradeReportApp(tk.Tk):
+
+    def __init__(self):
+        super().__init__()
+
+        # ----------------------------------------------------
+        # Window configuration
+        # ----------------------------------------------------
+
+        self.title(APP_TITLE)
+
+        # Compact professional window
+        self.geometry("960x700")
+
+        self.minsize(850, 620)
+
+        # Start centered
+        self.center_window()
+
+        self.configure(bg=BG_COLOR)
+
+        # Prevent accidental fullscreen/maximized appearance
+        self.resizable(True, True)
+
+        # ----------------------------------------------------
+        # Application data
+        # ----------------------------------------------------
+
+        self.grades_file = "grades.txt"
+
+        # These will be replaced automatically by grades.txt
+        self.student_name = ""
+        self.program_year = ""
+
+        # ----------------------------------------------------
+        # Build application
+        # ----------------------------------------------------
+
+        self.setup_style()
+        self.create_variables()
+        self.build_ui()
+
+        # Load grades automatically
+        self.after(100, self.load_grades)
+
+
+    # ========================================================
+    # WINDOW
+    # ========================================================
+
+    def center_window(self):
+
+        self.update_idletasks()
+
+        width = 960
+        height = 700
+
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+
+    # ========================================================
+    # STYLE
+    # ========================================================
+
+    def setup_style(self):
+
+        style = ttk.Style(self)
+
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        # ----------------------------------------------------
+        # General
+        # ----------------------------------------------------
+
+        style.configure(
+            ".",
+            font=("Segoe UI", 10)
+        )
+
+        # ----------------------------------------------------
+        # Buttons
+        # ----------------------------------------------------
+
+        style.configure(
+            "Primary.TButton",
+            font=("Segoe UI", 10, "bold"),
+            foreground="white",
+            background=PRIMARY_COLOR,
+            padding=(18, 9),
+            borderwidth=0
+        )
+
+        style.map(
+            "Primary.TButton",
+            background=[
+                ("active", PRIMARY_HOVER),
+                ("pressed", PRIMARY_HOVER)
+            ]
+        )
+
+        style.configure(
+            "Secondary.TButton",
+            font=("Segoe UI", 9),
+            foreground=TEXT_COLOR,
+            background="#EEF1F5",
+            padding=(12, 7),
+            borderwidth=0
+        )
+
+        style.map(
+            "Secondary.TButton",
+            background=[
+                ("active", "#E2E7EE"),
+                ("pressed", "#D9DEE6")
+            ]
+        )
+
+        # ----------------------------------------------------
+        # Labels
+        # ----------------------------------------------------
+
+        style.configure(
+            "Title.TLabel",
+            font=("Segoe UI", 20, "bold"),
+            foreground=TEXT_COLOR,
+            background=BG_COLOR
+        )
+
+        style.configure(
+            "Subtitle.TLabel",
+            font=("Segoe UI", 9),
+            foreground=SECONDARY_TEXT,
+            background=BG_COLOR
+        )
+
+        style.configure(
+            "Section.TLabel",
+            font=("Segoe UI", 11, "bold"),
+            foreground=TEXT_COLOR,
+            background=CARD_COLOR
+        )
+
+        style.configure(
+            "Info.TLabel",
+            font=("Segoe UI", 9),
+            foreground=SECONDARY_TEXT,
+            background=CARD_COLOR
+        )
+
+        style.configure(
+            "Value.TLabel",
+            font=("Segoe UI", 10, "bold"),
+            foreground=TEXT_COLOR,
+            background=CARD_COLOR
+        )
+
+        # ----------------------------------------------------
+        # Treeview
+        # ----------------------------------------------------
+
+        style.configure(
+            "Treeview",
+            background=CARD_COLOR,
+            fieldbackground=CARD_COLOR,
+            foreground=TEXT_COLOR,
+            rowheight=34,
+            font=("Segoe UI", 9),
+            borderwidth=0
+        )
+
+        style.configure(
+            "Treeview.Heading",
+            background="#F1F4F8",
+            foreground=TEXT_COLOR,
+            font=("Segoe UI", 9, "bold"),
+            padding=8,
+            borderwidth=0
+        )
+
+        style.map(
+            "Treeview",
+            background=[
+                ("selected", "#DCEAF7")
+            ],
+            foreground=[
+                ("selected", TEXT_COLOR)
+            ]
+        )
+
+        # ----------------------------------------------------
+        # Entry
+        # ----------------------------------------------------
+
+        style.configure(
+            "Modern.TEntry",
+            padding=8,
+            font=("Segoe UI", 10)
+        )
+
+
+    # ========================================================
+    # VARIABLES
+    # ========================================================
+
+    def create_variables(self):
+
+        self.recipient_var = tk.StringVar()
+
+        self.file_var = tk.StringVar(
+            value=self.grades_file
+        )
+
+        self.total_units_var = tk.StringVar(
+            value="0"
+        )
+
+        self.average_var = tk.StringVar(
+            value="0.00"
+        )
+
+        self.status_var = tk.StringVar(
+            value="Ready"
+        )
+
+        self.student_var = tk.StringVar(
+            value="—"
+        )
+
+        self.program_var = tk.StringVar(
+            value="—"
+        )
+
+
+    # ========================================================
+    # UI
+    # ========================================================
+
+    def build_ui(self):
+
+        # ----------------------------------------------------
+        # Main container
+        # ----------------------------------------------------
+
+        outer = tk.Frame(
+            self,
+            bg=BG_COLOR
+        )
+
+        outer.pack(
+            fill="both",
+            expand=True,
+            padx=28,
+            pady=22
+        )
+
+        # ====================================================
+        # HEADER
+        # ====================================================
+
+        header = tk.Frame(
+            outer,
+            bg=BG_COLOR
+        )
+
+        header.pack(
+            fill="x",
+            pady=(0, 18)
+        )
+
+        title_area = tk.Frame(
+            header,
+            bg=BG_COLOR
+        )
+
+        title_area.pack(
+            side="left"
+        )
+
+        tk.Label(
+            title_area,
+            text="NDMU Grade Report",
+            font=("Segoe UI", 21, "bold"),
+            fg=TEXT_COLOR,
+            bg=BG_COLOR
+        ).pack(anchor="w")
+
+        tk.Label(
+            title_area,
+            text="University grade management and email delivery",
+            font=("Segoe UI", 9),
+            fg=SECONDARY_TEXT,
+            bg=BG_COLOR
+        ).pack(
+            anchor="w",
+            pady=(2, 0)
+        )
+
+        # Status indicator
+
+        status_frame = tk.Frame(
+            header,
+            bg=BG_COLOR
+        )
+
+        status_frame.pack(
+            side="right",
+            pady=6
+        )
+
+        self.status_dot = tk.Label(
+            status_frame,
+            text="●",
+            font=("Segoe UI", 9),
+            fg=SUCCESS_COLOR,
+            bg=BG_COLOR
+        )
+
+        self.status_dot.pack(
+            side="left",
+            padx=(0, 5)
+        )
+
+        tk.Label(
+            status_frame,
+            textvariable=self.status_var,
+            font=("Segoe UI", 9),
+            fg=SECONDARY_TEXT,
+            bg=BG_COLOR
+        ).pack(
+            side="left"
+        )
+
+
+        # ====================================================
+        # STUDENT INFORMATION CARD
+        # ====================================================
+
+        student_card = self.create_card(
+            outer
+        )
+
+        student_card.pack(
+            fill="x",
+            pady=(0, 14)
+        )
+
+        # Card header
+
+        student_header = tk.Frame(
+            student_card,
+            bg=CARD_COLOR
+        )
+
+        student_header.pack(
+            fill="x",
+            padx=18,
+            pady=(14, 8)
+        )
+
+        tk.Label(
+            student_header,
+            text="Student Information",
+            font=("Segoe UI", 10, "bold"),
+            fg=TEXT_COLOR,
+            bg=CARD_COLOR
+        ).pack(
+            side="left"
+        )
+
+        # Information row
+
+        info_row = tk.Frame(
+            student_card,
+            bg=CARD_COLOR
+        )
+
+        info_row.pack(
+            fill="x",
+            padx=18,
+            pady=(0, 15)
+        )
+
+        # Student
+
+        student_box = tk.Frame(
+            info_row,
+            bg=CARD_COLOR
+        )
+
+        student_box.pack(
+            side="left",
+            fill="x",
+            expand=True
+        )
+
+        tk.Label(
+            student_box,
+            text="STUDENT",
+            font=("Segoe UI", 8, "bold"),
+            fg=SECONDARY_TEXT,
+            bg=CARD_COLOR
+        ).pack(anchor="w")
+
+        tk.Label(
+            student_box,
+            textvariable=self.student_var,
+            font=("Segoe UI", 11, "bold"),
+            fg=TEXT_COLOR,
+            bg=CARD_COLOR
+        ).pack(
+            anchor="w",
+            pady=(3, 0)
+        )
+
+        # Program
+
+        program_box = tk.Frame(
+            info_row,
+            bg=CARD_COLOR
+        )
+
+        program_box.pack(
+            side="left",
+            fill="x",
+            expand=True
+        )
+
+        tk.Label(
+            program_box,
+            text="PROGRAM & YEAR",
+            font=("Segoe UI", 8, "bold"),
+            fg=SECONDARY_TEXT,
+            bg=CARD_COLOR
+        ).pack(anchor="w")
+
+        tk.Label(
+            program_box,
+            textvariable=self.program_var,
+            font=("Segoe UI", 11, "bold"),
+            fg=TEXT_COLOR,
+            bg=CARD_COLOR
+        ).pack(
+            anchor="w",
+            pady=(3, 0)
+        )
+
+
+        # ====================================================
+        # GRADES CARD
+        # ====================================================
+
+        grades_card = self.create_card(
+            outer
+        )
+
+        grades_card.pack(
+            fill="both",
+            expand=True,
+            pady=(0, 14)
+        )
+
+        # Grades header
+
+        grades_header = tk.Frame(
+            grades_card,
+            bg=CARD_COLOR
+        )
+
+        grades_header.pack(
+            fill="x",
+            padx=18,
+            pady=(14, 9)
+        )
+
+        tk.Label(
+            grades_header,
+            text="Course Grades",
+            font=("Segoe UI", 10, "bold"),
+            fg=TEXT_COLOR,
+            bg=CARD_COLOR
+        ).pack(
+            side="left"
+        )
+
+        ttk.Button(
+            grades_header,
+            text="↻  Reload",
+            style="Secondary.TButton",
+            command=self.load_grades
+        ).pack(
+            side="right"
+        )
+
+        # ----------------------------------------------------
+        # Table container
+        # ----------------------------------------------------
+
+        table_frame = tk.Frame(
+            grades_card,
+            bg=CARD_COLOR
+        )
+
+        table_frame.pack(
+            fill="both",
+            expand=True,
+            padx=18
+        )
+
+        columns = (
+            "code",
+            "title",
+            "units",
+            "grade"
+        )
+
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=columns,
+            show="headings",
+            selectmode="browse"
+        )
+
+        self.tree.heading(
+            "code",
+            text="COURSE CODE"
+        )
+
+        self.tree.heading(
+            "title",
+            text="COURSE TITLE"
+        )
+
+        self.tree.heading(
+            "units",
+            text="UNITS"
+        )
+
+        self.tree.heading(
+            "grade",
+            text="GRADE"
+        )
+
+        self.tree.column(
+            "code",
+            width=130,
+            anchor="w"
+        )
+
+        self.tree.column(
+            "title",
+            width=430,
+            anchor="w"
+        )
+
+        self.tree.column(
+            "units",
+            width=70,
+            anchor="center"
+        )
+
+        self.tree.column(
+            "grade",
+            width=80,
+            anchor="center"
+        )
+
+        # Scrollbar
+
+        scrollbar = ttk.Scrollbar(
+            table_frame,
+            orient="vertical",
+            command=self.tree.yview
+        )
+
+        self.tree.configure(
+            yscrollcommand=scrollbar.set
+        )
+
+        self.tree.pack(
+            side="left",
+            fill="both",
+            expand=True
+        )
+
+        scrollbar.pack(
+            side="right",
+            fill="y"
+        )
+
+        # ----------------------------------------------------
+        # Summary
+        # ----------------------------------------------------
+
+        summary = tk.Frame(
+            grades_card,
+            bg=CARD_COLOR
+        )
+
+        summary.pack(
+            fill="x",
+            padx=18,
+            pady=(10, 15)
+        )
+
+        # Total units
+
+        units_summary = tk.Frame(
+            summary,
+            bg="#F5F8FC"
+        )
+
+        units_summary.pack(
+            side="left",
+            padx=(0, 10)
+        )
+
+        tk.Label(
+            units_summary,
+            text="TOTAL UNITS",
+            font=("Segoe UI", 8, "bold"),
+            fg=SECONDARY_TEXT,
+            bg="#F5F8FC"
+        ).pack(
+            side="left",
+            padx=(12, 6),
+            pady=9
+        )
+
+        tk.Label(
+            units_summary,
+            textvariable=self.total_units_var,
+            font=("Segoe UI", 10, "bold"),
+            fg=TEXT_COLOR,
+            bg="#F5F8FC"
+        ).pack(
+            side="left",
+            padx=(0, 12)
+        )
+
+        # Average
+
+        average_summary = tk.Frame(
+            summary,
+            bg="#F5F8FC"
+        )
+
+        average_summary.pack(
+            side="left"
+        )
+
+        tk.Label(
+            average_summary,
+            text="WEIGHTED AVERAGE",
+            font=("Segoe UI", 8, "bold"),
+            fg=SECONDARY_TEXT,
+            bg="#F5F8FC"
+        ).pack(
+            side="left",
+            padx=(12, 6),
+            pady=9
+        )
+
+        tk.Label(
+            average_summary,
+            textvariable=self.average_var,
+            font=("Segoe UI", 10, "bold"),
+            fg=PRIMARY_COLOR,
+            bg="#F5F8FC"
+        ).pack(
+            side="left",
+            padx=(0, 12)
+        )
+
+
+        # ====================================================
+        # EMAIL CARD
+        # ====================================================
+
+        email_card = self.create_card(
+            outer
+        )
+
+        email_card.pack(
+            fill="x",
+            pady=(0, 14)
+        )
+
+        email_content = tk.Frame(
+            email_card,
+            bg=CARD_COLOR
+        )
+
+        email_content.pack(
+            fill="x",
+            padx=18,
+            pady=14
+        )
+
+        # Label
+
+        email_label = tk.Frame(
+            email_content,
+            bg=CARD_COLOR
+        )
+
+        email_label.pack(
+            side="left"
+        )
+
+        tk.Label(
+            email_label,
+            text="Send Grade Report",
+            font=("Segoe UI", 10, "bold"),
+            fg=TEXT_COLOR,
+            bg=CARD_COLOR
+        ).pack(
+            anchor="w"
+        )
+
+        tk.Label(
+            email_label,
+            text="Recipient email",
+            font=("Segoe UI", 8),
+            fg=SECONDARY_TEXT,
+            bg=CARD_COLOR
+        ).pack(
+            anchor="w",
+            pady=(2, 0)
+        )
+
+        # Entry
+
+        self.email_entry = ttk.Entry(
+            email_content,
+            textvariable=self.recipient_var,
+            style="Modern.TEntry"
+        )
+
+        self.email_entry.pack(
+            side="left",
+            fill="x",
+            expand=True,
+            padx=(25, 10)
+        )
+
+        # Send button
+
+        ttk.Button(
+            email_content,
+            text="Send Report",
+            style="Primary.TButton",
+            command=self.send_report
+        ).pack(
+            side="right"
+        )
+
+
+        # ====================================================
+        # DELIVERY LOG
+        # ====================================================
+
+        log_header = tk.Frame(
+            outer,
+            bg=BG_COLOR
+        )
+
+        log_header.pack(
+            fill="x",
+            pady=(0, 5)
+        )
+
+        tk.Label(
+            log_header,
+            text="Delivery Log",
+            font=("Segoe UI", 9, "bold"),
+            fg=TEXT_COLOR,
+            bg=BG_COLOR
+        ).pack(
+            side="left"
+        )
+
+        ttk.Button(
+            log_header,
+            text="Clear",
+            style="Secondary.TButton",
+            command=self.clear_log
+        ).pack(
+            side="right"
+        )
+
+        self.log = tk.Text(
+            outer,
+            height=5,
+            bg=LOG_BG,
+            fg=LOG_TEXT,
+            insertbackground="white",
+            font=("Consolas", 9),
+            relief="flat",
+            bd=0,
+            padx=12,
+            pady=9
+        )
+
+        self.log.pack(
+            fill="x"
+        )
+
+
+    # ========================================================
+    # CARD CREATOR
+    # ========================================================
+
+    def create_card(self, parent):
+
+        card = tk.Frame(
+            parent,
+            bg=CARD_COLOR,
+            highlightbackground=BORDER_COLOR,
+            highlightcolor=BORDER_COLOR,
+            highlightthickness=1,
+            bd=0
+        )
+
+        return card
+
+
+    # ========================================================
+    # LOGGING
+    # ========================================================
+
+    def log_message(self, message):
+
+        self.log.insert(
+            "end",
+            message + "\n"
+        )
+
+        self.log.see("end")
+
+        self.status_var.set(
+            message
+        )
+
+
+    def clear_log(self):
+
+        self.log.delete(
+            "1.0",
+            "end"
+        )
+
+        self.status_var.set(
+            "Log cleared"
+        )
+
+
+    # ========================================================
+    # GRADE PARSER
+    # ========================================================
+
+    def parse_grades(self, path):
+
+        """
+        Expected grades.txt format:
+
+        Andrae John V. Almodiente, BSCS 2
+        CSCC 102, Fundumentals of Programming, 3, 1.25
+        CSMath 101, Trigonometric Mathematics, 3, 2.00
+        AH 111, Purposive Communication, 3, 2.25
+        AH 112, Arts Apprectiation, 3, 2.50
+        CSPC 102, Discrete Structures II, 3, 1.25
+        WKL 2, PananalikSox, 3, 1.75
+        PathFit 2, Physical Education, 3, 1.00
+        RE 112, life of Jesus Christ, 3, 1.50
+        NSTP 2, National Service Program, 3, 2.50
+        SDS 2, Students Development, 1, 1.00
+        """
+
+        records = []
+
+        with open(
+            path,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            lines = [
+                line.strip()
+                for line in f
+                if line.strip()
+                and not line.strip().startswith("#")
+            ]
+
+        if not lines:
+            return records
+
+        # ----------------------------------------------------
+        # FIRST LINE
+        # Student Name, Program & Year
+        # ----------------------------------------------------
+
+        student_info = [
+            p.strip()
+            for p in lines[0].split(",")
+        ]
+
+        if len(student_info) >= 2:
+
+            self.student_name = student_info[0]
+
+            self.program_year = student_info[1]
+
+            self.student_var.set(
+                self.student_name
+            )
+
+            self.program_var.set(
+                self.program_year
+            )
+
+        # ----------------------------------------------------
+        # COURSE RECORDS
+        # ----------------------------------------------------
+
+        for line in lines[1:]:
+
+            parts = [
+                p.strip()
+                for p in line.split(",")
+            ]
+
+            if len(parts) < 4:
+                continue
+
+            code = parts[0]
+            title = parts[1]
+            units = parts[2]
+            grade = parts[3]
+
+            if (
+                self.is_number(units)
+                and self.is_number(grade)
+            ):
+
+                records.append(
+                    {
+                        "code": code,
+                        "title": title,
+                        "units": float(units),
+                        "grade": float(grade)
+                    }
+                )
+
+        return records
+
+
+    # ========================================================
+    # NUMBER CHECK
+    # ========================================================
+
+    @staticmethod
+    def is_number(value):
+
+        try:
+            float(value)
+            return True
+
+        except ValueError:
+            return False
+
+
+    # ========================================================
+    # LOAD GRADES
+    # ========================================================
+
+    def load_grades(self):
+
+        path = self.file_var.get()
+
+        # ----------------------------------------------------
+        # Find grades.txt
+        # ----------------------------------------------------
+
+        if not os.path.exists(path):
+
+            selected = filedialog.askopenfilename(
+                title="Select grades.txt",
+                filetypes=[
+                    ("Text files", "*.txt"),
+                    ("All files", "*.*")
+                ]
+            )
+
+            if not selected:
+
+                self.load_sample_data()
+
+                self.log_message(
+                    "READY   -> Sample data displayed."
+                )
+
+                return
+
+            path = selected
+
+            self.file_var.set(
+                path
+            )
+
+        # ----------------------------------------------------
+        # Read file
+        # ----------------------------------------------------
+
+        try:
+
+            records = self.parse_grades(
+                path
+            )
+
+            if not records:
+
+                raise ValueError(
+                    "No valid grade records were found."
+                )
+
+            self.display_records(
+                records
+            )
+
+            self.log_message(
+                f"LOADED  -> {len(records)} course(s) for "
+                f"{self.student_name}"
+            )
+
+        except Exception as exc:
+
+            messagebox.showerror(
+                "Grade Loading Error",
+                str(exc)
+            )
+
+            self.load_sample_data()
+
+            self.log_message(
+                "ERROR   -> Could not read grades.txt."
+            )
+
+
+    # ========================================================
+    # SAMPLE DATA
+    # ========================================================
+
+    def load_sample_data(self):
+
+        self.student_name = (
+            "Andrae John V. Almodiente"
+        )
+
+        self.program_year = "BSCS 2"
+
+        self.student_var.set(
+            self.student_name
+        )
+
+        self.program_var.set(
+            self.program_year
+        )
+
+        records = [
+
+            {
+                "code": "CSCC 102",
+                "title": "Fundumentals of Programming",
+                "units": 3,
+                "grade": 1.25
+            },
+
+            {
+                "code": "CSMath 101",
+                "title": "Trigonometric Mathematics",
+                "units": 3,
+                "grade": 2.00
+            },
+
+            {
+                "code": "AH 111",
+                "title": "Purposive Communication",
+                "units": 3,
+                "grade": 2.25
+            }
+
+        ]
+
+        self.display_records(
+            records
+        )
+
+
+    # ========================================================
+    # DISPLAY GRADES
+    # ========================================================
+
+    def display_records(self, records):
+
+        # Clear existing rows
+
+        for item in self.tree.get_children():
+
+            self.tree.delete(
+                item
+            )
+
+        total_units = 0
+
+        weighted_points = 0
+
+        # ----------------------------------------------------
+        # Add records
+        # ----------------------------------------------------
+
+        for record in records:
+
+            units = float(
+                record["units"]
+            )
+
+            grade = float(
+                record["grade"]
+            )
+
+            self.tree.insert(
+                "",
+                "end",
+                values=(
+                    record["code"],
+                    record["title"],
+                    f"{units:g}",
+                    f"{grade:.2f}"
+                )
+            )
+
+            total_units += units
+
+            weighted_points += (
+                units * grade
+            )
+
+        # ----------------------------------------------------
+        # Calculate average
+        # ----------------------------------------------------
+
+        average = (
+            weighted_points / total_units
+            if total_units
+            else 0
+        )
+
+        self.total_units_var.set(
+            f"{total_units:g}"
+        )
+
+        self.average_var.set(
+            f"{average:.2f}"
+        )
+
+
+    # ========================================================
+    # EMAIL BODY
+    # ========================================================
+
+    def create_email_body(self):
+
+        rows = []
+
+        for item in self.tree.get_children():
+
+            code, title, units, grade = (
+                self.tree.item(item, "values")
+            )
+
+            rows.append(
+                f"""
+                <tr>
+                    <td>{code}</td>
+                    <td>{title}</td>
+                    <td>{units}</td>
+                    <td>{grade}</td>
+                </tr>
+                """
+            )
+
+        return f"""
+        <html>
+
+        <body style="
+            font-family: Arial, sans-serif;
+            color: #172B4D;
+            line-height: 1.5;
+        ">
+
+            <h2>
+                NDMU University Grade Report
+            </h2>
+
+            <p>
+                <b>Student:</b>
+                {self.student_name}
+            </p>
+
+            <p>
+                <b>Program & Year:</b>
+                {self.program_year}
+            </p>
+
+            <table
+                border="1"
+                cellpadding="8"
+                cellspacing="0"
+                style="
+                    border-collapse: collapse;
+                    width: 100%;
+                "
+            >
+
+                <tr>
+                    <th>Course Code</th>
+                    <th>Course Title</th>
+                    <th>Units</th>
+                    <th>Grade</th>
+                </tr>
+
+                {''.join(rows)}
+
+            </table>
+
+            <p>
+                <b>Total Units:</b>
+                {self.total_units_var.get()}
+            </p>
+
+            <p>
+                <b>Weighted Average:</b>
+                {self.average_var.get()}
+            </p>
+
+        </body>
+
+        </html>
+        """
+
+
+    # ========================================================
+    # SEND REPORT THROUGH BREVO
+    # ========================================================
+
+    def send_report(self):
+
+        recipient = (
+            self.recipient_var.get()
+            .strip()
+        )
+
+        # ----------------------------------------------------
+        # Validate recipient
+        # ----------------------------------------------------
+
+        if not recipient:
+
+            messagebox.showwarning(
+                "Missing Recipient",
+                "Enter an email address."
+            )
+
+            return
+
+        if not re.match(
+            r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+            recipient
+        ):
+
+            messagebox.showwarning(
+                "Invalid Email",
+                "Enter a valid email address."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Check API key
+        # ----------------------------------------------------
+
+        if not BREVO_API_KEY:
+
+            messagebox.showinfo(
+                "Brevo API Key Required",
+                "The GUI is ready, but BREVO_API_KEY "
+                "is not configured.\n\n"
+                "Windows PowerShell:\n\n"
+                '$env:BREVO_API_KEY="your_api_key_here"\n\n'
+                "Also set BREVO_SENDER_EMAIL to your "
+                "verified Brevo sender email."
+            )
+
+            self.log_message(
+                "WAITING -> Brevo API key is not configured."
+            )
+
+            return
+
+        # ----------------------------------------------------
+        # Sending
+        # ----------------------------------------------------
+
+        self.log_message(
+            f"SENDING -> Grade report to {recipient}..."
+        )
+
+        payload = {
+
+            "sender": {
+                "name": "NDMU Grade Report Console",
+                "email": DEFAULT_SENDER_EMAIL
+            },
+
+            "to": [
+                {
+                    "email": recipient,
+                    "name": self.student_name
+                }
+            ],
+
+            "subject": (
+                f"Grade Report - "
+                f"{self.student_name}"
+            ),
+
+            "htmlContent": (
+                self.create_email_body()
+            )
+        }
+
+        request = urllib.request.Request(
+
+            "https://api.brevo.com/v3/smtp/email",
+
+            data=json.dumps(
+                payload
+            ).encode("utf-8"),
+
+            headers={
+                "accept": "application/json",
+                "api-key": BREVO_API_KEY,
+                "content-type": "application/json"
+            },
+
+            method="POST"
+        )
+
+        # ----------------------------------------------------
+        # Send request
+        # ----------------------------------------------------
+
+        try:
+
+            with urllib.request.urlopen(
+                request,
+                timeout=20
+            ) as response:
+
+                response.read()
+
+            self.log_message(
+                f"SENT    -> Successfully delivered "
+                f"to {recipient}"
+            )
+
+            messagebox.showinfo(
+                "Report Sent",
+                "The grade report was successfully "
+                f"sent to:\n{recipient}"
+            )
+
+        # ----------------------------------------------------
+        # Brevo error
+        # ----------------------------------------------------
+
+        except urllib.error.HTTPError as exc:
+
+            details = (
+                exc.read()
+                .decode(
+                    "utf-8",
+                    errors="replace"
+                )
+            )
+
+            self.log_message(
+                f"FAILED  -> Brevo HTTP "
+                f"{exc.code}: {details}"
+            )
+
+            messagebox.showerror(
+                "Brevo Error",
+                f"Brevo returned HTTP {exc.code}.\n\n"
+                f"{details}"
+            )
+
+        # ----------------------------------------------------
+        # Other error
+        # ----------------------------------------------------
+
+        except Exception as exc:
+
+            self.log_message(
+                f"FAILED  -> {exc}"
+            )
+
+            messagebox.showerror(
+                "Sending Error",
+                str(exc)
+            )
+
+
+# ============================================================
+# START APPLICATION
+# ============================================================
+
+if __name__ == "__main__":
+
+    app = GradeReportApp()
+
+    app.mainloop()
